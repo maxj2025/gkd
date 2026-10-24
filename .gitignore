@@ -25,3 +25,6 @@ local.properties
 /.local/
 
 /gradle/libs.versions.updates.toml
+
+/成品/
+*签名备份*.zip
