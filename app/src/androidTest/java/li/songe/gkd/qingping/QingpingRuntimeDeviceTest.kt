@@ -49,9 +49,8 @@ class QingpingRuntimeDeviceTest {
             storeFlow.update { it.copy(enableMatch = true, qingpingAutoRestore = false) }
             shell("input keyevent 3")
             delay(400)
-            app.startActivity(Intent().setComponent(ComponentName(fixture, "$fixture.AdActivity"))
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                .putExtra("ordinary", true))
+            // Model the user opening another app, rather than a background app launch.
+            shell("am start -W -f 268468224 -n $fixture/.AdActivity --ez ordinary true")
             withTimeout(8000) { while (li.songe.gkd.a11y.topActivityFlow.value.appId != fixture) delay(50) }
             delay(1200)
             val appChangedAt = li.songe.gkd.a11y.appChangeTime
@@ -80,22 +79,23 @@ class QingpingRuntimeDeviceTest {
           {key:0,name:'开屏广告-坐标回归',enable:true,actionMaximum:1,
            rules:[{key:0,matches:"[text='跳过']",action:'clickCenter'}]}]}]}""")
         try {
-            storeFlow.update { it.copy(enableMatch = true, qingpingAutoRestore = false) }
-            persistSubscription(raw)
-            DbSet.subsItemDao.insertOrIgnore(SubsItem(id = id, enable = true, enableUpdate = false, order = 1))
-            val before = DbSet.qingpingStatDao.get(fixture, kind)?.count ?: 0
-            val intent = Intent().setComponent(ComponentName(fixture, "$fixture.AdActivity"))
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                .putExtra("ordinary", true).putExtra("noEffect", noEffect)
-            // Give the subscription observer time to produce the new resolved rule.
-            withTimeout(12000) {
-                while (li.songe.gkd.util.ruleSummaryFlow.value.appIdToRules[fixture].orEmpty().none { it.subsItem.id == id }) delay(100)
-            }
+            // Leave the previous fixture before enabling its new rule: rule-loading
+            // now intentionally starts matching the already visible foreground page.
             shell("input keyevent 3")
             withTimeout(8000) {
                 while (li.songe.gkd.a11y.topActivityFlow.value.appId == fixture) delay(100)
             }
-            app.startActivity(intent)
+            shell("am force-stop $fixture")
+            delay(500) // Let the launcher transition finish before the next user launch.
+            storeFlow.update { it.copy(enableMatch = true, qingpingAutoRestore = false) }
+            persistSubscription(raw)
+            DbSet.subsItemDao.insertOrIgnore(SubsItem(id = id, enable = true, enableUpdate = false, order = 1))
+            val before = DbSet.qingpingStatDao.get(fixture, kind)?.count ?: 0
+            // Give the subscription observer time to produce the new resolved rule.
+            withTimeout(12000) {
+                while (li.songe.gkd.util.ruleSummaryFlow.value.appIdToRules[fixture].orEmpty().none { it.subsItem.id == id }) delay(100)
+            }
+            shell("am start -W -f 268468224 -n $fixture/.AdActivity --ez ordinary true --ez noEffect $noEffect")
             try {
                 withTimeout(15000) {
                     while ((DbSet.qingpingStatDao.get(fixture, kind)?.count ?: 0) == before) delay(100)
