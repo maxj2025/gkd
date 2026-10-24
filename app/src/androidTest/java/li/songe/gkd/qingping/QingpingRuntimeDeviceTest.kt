@@ -40,6 +40,37 @@ class QingpingRuntimeDeviceTest {
     @Test fun real_coordinate_gesture_completes_and_exit_is_verified() = runBlocking { checkFixture(false) }
     @Test fun ignored_coordinate_click_is_recorded_as_remaining_not_exit() = runBlocking { checkFixture(true) }
 
+    @Test fun cold_service_binding_discovers_an_already_open_ad_page() = runBlocking {
+        val previous = storeFlow.value
+        val id = 20261031L
+        val fixture = "io.qingping.fixture"
+        try {
+            shell("settings delete secure enabled_accessibility_services")
+            withTimeout(8000) { while (A11yService.instance != null) delay(100) }
+            storeFlow.update { it.copy(enableMatch = true, qingpingAutoRestore = false) }
+            persistSubscription(RawSubscription.parse("""{id:20261031,name:'冷连接回归',version:1,apps:[{id:'io.qingping.fixture',groups:[
+                {key:0,name:'开屏广告-冷连接',enable:true,actionMaximum:1,rules:[{key:0,matches:"[text='跳过']",action:'clickCenter'}]}]}]}"""))
+            DbSet.subsItemDao.insertOrIgnore(SubsItem(id = id, enable = true, enableUpdate = false, order = 1))
+            shell("am force-stop $fixture")
+            shell("am start -W -f 268468224 -n $fixture/.AdActivity --ez ordinary true")
+            delay(700)
+            // Model a fresh process with no previously observed foreground events.
+            synchronized(li.songe.gkd.a11y.topActivityFlow) {
+                li.songe.gkd.a11y.topActivityFlow.value = li.songe.gkd.a11y.TopActivity()
+                li.songe.gkd.a11y.activityRuleFlow.value = li.songe.gkd.a11y.ActivityRule()
+            }
+            val before = DbSet.qingpingStatDao.get(fixture, "splash")?.count ?: 0
+            bindService()
+            withTimeout(6500) {
+                while ((DbSet.qingpingStatDao.get(fixture, "splash")?.count ?: 0) == before) delay(100)
+            }
+            assertTrue(ui.rootInActiveWindow.findAccessibilityNodeInfosByText("已进入内容页").isNotEmpty())
+        } finally {
+            deleteSubscription(id)
+            storeFlow.value = previous
+        }
+    }
+
     @Test fun rules_loaded_after_foreground_event_run_without_reopening_app() = runBlocking {
         bindService()
         val previous = storeFlow.value

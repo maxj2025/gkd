@@ -91,6 +91,22 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                 startQueryJob()
             }
         }
+        scope.launch(eventDispatcher) {
+            // A service restored after the page opened missed its original event.
+            // Bootstrap only an unknown foreground, with a finite read budget.
+            repeat(3) {
+                if (!effective || !isInteractive || topActivityFlow.value.appId.isNotEmpty()) return@launch
+                val appId = getTimeoutActiveWindow()?.packageName?.toString()
+                if (!appId.isNullOrEmpty()) {
+                    synchronized(topActivityFlow) {
+                        if (topActivityFlow.value.appId.isEmpty()) updateTopActivity(appId, null)
+                    }
+                    startQueryJob()
+                    return@launch
+                }
+                delay(200)
+            }
+        }
         if (storeFlow.value.enableBlockA11yAppList && !actualBlockA11yAppList.contains(topAppIdFlow.value)) {
             startQueryJob(byForced = true)
         }
@@ -204,7 +220,7 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         val rightAppId = if (oldAppId == evAppId) {
             evAppId
         } else {
-            getTimeoutAppId() ?: return
+            getTimeoutAppId(fresh = latestEvent.type == STATE_CHANGED) ?: return
         }
         if (rightAppId == evAppId) {
             if (latestEvent.type == STATE_CHANGED) {
@@ -238,11 +254,14 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
 
     private var lastGetAppIdTime = 0L
     private var lastAppId: String? = null
-    private suspend fun getTimeoutAppId(): String? {
-        if (lastAppId != null && System.currentTimeMillis() - lastGetAppIdTime <= 100) return lastAppId
+    private suspend fun getTimeoutAppId(fresh: Boolean = false): String? {
+        // A new activity can arrive inside the old package cache's 100ms lifetime.
+        // Resolve state changes against the actual window, rather than losing the
+        // only launch event because a recent launcher result was reused.
+        if (!fresh && lastAppId != null && System.currentTimeMillis() - lastGetAppIdTime <= 100) return lastAppId
         // 某些应用通过无障碍获取 safeActiveWindow 耗时长，导致多个事件连续堆积堵塞，无法检测到 appId 切换导致状态异常
         // https://github.com/gkd-kit/gkd/issues/622
-        lastAppId = withTimeoutOrNull(100) {
+        lastAppId = withTimeoutOrNull(if (fresh) 500 else 100) {
             runInterruptible(Dispatchers.IO) { safeActiveWindowAppId }
         } ?: shizukuContextFlow.value.topCpn()?.packageName
         lastGetAppIdTime = System.currentTimeMillis()
