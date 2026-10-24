@@ -193,6 +193,7 @@ private val screenStateReceiver = object : BroadcastReceiver() {
         intent: Intent?
     ) {
         val action = intent?.action ?: return
+        if (action == Intent.ACTION_USER_PRESENT) li.songe.gkd.qingping.requestQingpingRestore()
         LogUtils.d("screenStateReceiver->${action}")
         isInteractive = when (action) {
             Intent.ACTION_SCREEN_ON -> true

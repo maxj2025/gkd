@@ -8,10 +8,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import li.songe.gkd.META
 import li.songe.gkd.a11y.systemRecentCn
 import li.songe.gkd.a11y.topActivityFlow
@@ -41,44 +40,38 @@ class GkdTileService : BaseTileService() {
     }
 }
 
-private val modifyA11yMutex = Mutex()
+private val modifyA11yMutex get() = li.songe.gkd.qingping.qingpingA11yMutex
 private const val A11Y_AWAIT_START_TIME = 2000L
 private const val A11Y_AWAIT_FIX_TIME = 1000L
 
 private fun modifyA11yRun(block: suspend () -> Unit) {
-    if (modifyA11yMutex.isLocked) return
     appScope.launchTry(Dispatchers.IO) {
-        if (modifyA11yMutex.isLocked) return@launchTry
-        modifyA11yMutex.withLock { block() }
+        if (!modifyA11yMutex.tryLock()) return@launchTry
+        try { block() } finally { modifyA11yMutex.unlock() }
     }
 }
 
-private suspend fun switchA11yService() {
-    if (A11yService.isRunning.value) {
-        A11yService.instance?.disableSelf()
-    } else {
-        if (!writeSecureSettingsState.updateAndGet()) {
-            if (!writeSecureSettingsState.value) {
-                toast("请先授予「写入安全设置权限」")
-                return
-            }
-        }
-        val names = app.getSecureA11yServices()
-        app.putSecureInt(Settings.Secure.ACCESSIBILITY_ENABLED, 1)
-        if (names.contains(A11yService.a11yCn)) { // 当前无障碍异常, 重启服务
-            names.remove(A11yService.a11yCn)
-            app.putSecureA11yServices(names)
-            delay(A11Y_AWAIT_FIX_TIME)
-        }
-        names.add(A11yService.a11yCn)
-        app.putSecureA11yServices(names)
-        delay(A11Y_AWAIT_START_TIME)
-        // https://github.com/orgs/gkd-kit/discussions/799
-        if (!A11yService.isRunning.value) {
-            toast("开启无障碍失败")
-            accessRestrictedSettingsShowFlow.value = true
+private suspend fun startA11yService() {
+    if (storeFlow.value.qingpingManualOff || A11yService.isRunning.value) return
+    if (!writeSecureSettingsState.updateAndGet()) {
+        if (!writeSecureSettingsState.value) {
+            toast("请先授予「写入安全设置权限」")
             return
         }
+    }
+    val names = app.getSecureA11yServices()
+    app.putSecureInt(Settings.Secure.ACCESSIBILITY_ENABLED, 1)
+    if (names.contains(A11yService.a11yCn)) {
+        names.remove(A11yService.a11yCn)
+        app.putSecureA11yServices(names)
+        delay(A11Y_AWAIT_FIX_TIME)
+    }
+    if (storeFlow.value.qingpingManualOff) return
+    app.putSecureA11yServices(app.getSecureA11yServices().apply { add(A11yService.a11yCn) })
+    delay(A11Y_AWAIT_START_TIME)
+    if (!A11yService.isRunning.value) {
+        toast("开启无障碍失败")
+        accessRestrictedSettingsShowFlow.value = true
     }
 }
 
@@ -90,11 +83,15 @@ private fun switchAutomationService() {
     }
 }
 
-fun switchAutomatorService() = modifyA11yRun {
-    if (currentAppUseA11y) {
-        switchA11yService()
-    } else {
-        switchAutomationService()
+fun switchAutomatorService() {
+    // Record a user's stop immediately, even while recovery owns the settings mutex.
+    if (currentAppUseA11y && A11yService.isRunning.value) {
+        li.songe.gkd.qingping.stopQingpingService()
+        return
+    }
+    storeFlow.update { it.copy(qingpingManualOff = false) }
+    modifyA11yRun {
+        if (currentAppUseA11y) startA11yService() else switchAutomationService()
     }
 }
 
@@ -125,8 +122,8 @@ private suspend fun fixA11yService() {
             delay(A11Y_AWAIT_FIX_TIME)
             if (!currentAppUseA11y) return
         }
-        names.add(A11yService.a11yCn)
-        app.putSecureA11yServices(names)
+        if (!storeFlow.value.enableAutomator || storeFlow.value.qingpingManualOff) return
+        app.putSecureA11yServices(app.getSecureA11yServices().apply { add(A11yService.a11yCn) })
         delay(A11Y_AWAIT_START_TIME)
         if (currentAppUseA11y && !A11yService.isRunning.value) {
             toast("重启无障碍失败")
@@ -144,7 +141,7 @@ private fun fixAutomationService() {
 }
 
 fun fixRestartAutomatorService() = modifyA11yRun {
-    if (storeFlow.value.enableAutomator) {
+    if (storeFlow.value.enableAutomator && !storeFlow.value.qingpingManualOff) {
         if (currentAppUseA11y) {
             fixA11yService()
         } else {
@@ -160,7 +157,7 @@ val currentAppBlocked
     get() = storeFlow.value.enableBlockA11yAppList && topAppIdFlow.value in actualBlockA11yAppList
 
 private fun innerForcedUpdateA11yService(disabled: Boolean) {
-    if (!storeFlow.value.enableAutomator) {
+    if (!storeFlow.value.enableAutomator || storeFlow.value.qingpingManualOff) {
         return
     }
     if (disabled) {

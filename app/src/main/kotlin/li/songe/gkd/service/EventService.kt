@@ -37,6 +37,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -156,16 +159,23 @@ class EventService : OverlayWindowService(positionKey = "event") {
         }
     }
 
-    val tempEventListFlow = MutableStateFlow(emptyList<A11yEventLog>()).apply {
-        appScope.launch {
-            while (scope.isActive) {
-                delay(1000)
-                val list = getAndUpdate { emptyList() }
-                if (list.isNotEmpty()) {
-                    DbSet.a11yEventLogDao.insert(list)
+    val tempEventListFlow: MutableStateFlow<List<A11yEventLog>> = MutableStateFlow(emptyList<A11yEventLog>()).apply {
+        scope.launch {
+            try {
+                while (scope.isActive) {
+                    first { it.isNotEmpty() }
+                    delay(1000)
+                    flushEventLogs()
                 }
+            } finally {
+                flushEventLogs()
             }
         }
+    }
+
+    private suspend fun flushEventLogs() = withContext(NonCancellable) {
+        val list = tempEventListFlow.getAndUpdate { emptyList() }
+        if (list.isNotEmpty()) DbSet.a11yEventLogDao.insert(list)
     }
 
     init {

@@ -23,6 +23,12 @@ public final class QingpingPolicy {
         return success && action != null && !"none".equals(action);
     }
 
+    public static boolean canAct(String kind, boolean exitEnabled, boolean interactive,
+                                 long appAgeMs, boolean appSpecific, boolean matchingEnabled,
+                                 boolean sameWindow) {
+        return matchingEnabled && sameWindow && allows(kind, exitEnabled, interactive, appAgeMs, appSpecific);
+    }
+
     public static boolean shouldDropContent(boolean sameApp, long appAgeMs, boolean exitEnabled) {
         return sameApp && appAgeMs > STARTUP_WINDOW_MS && !exitEnabled;
     }

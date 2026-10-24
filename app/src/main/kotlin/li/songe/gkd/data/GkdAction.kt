@@ -7,11 +7,12 @@ import android.view.accessibility.AccessibilityNodeInfo
 import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import li.songe.gkd.a11y.A11yRuleEngine
-import li.songe.gkd.service.A11yService
 import li.songe.gkd.service.TrackService
 import li.songe.gkd.shizuku.casted
 import li.songe.gkd.shizuku.shizukuContextFlow
 import li.songe.gkd.util.ScreenUtils
+import li.songe.gkd.qingping.dispatchQingpingGesture
+import li.songe.gkd.qingping.validQingpingPoint
 
 @Serializable
 data class GkdAction(
@@ -58,7 +59,7 @@ sealed class ActionPerformer(val action: String) {
             val p = locationProps.position?.calc(rect)
             val x = p?.first ?: ((rect.right + rect.left) / 2f)
             val y = p?.second ?: ((rect.bottom + rect.top) / 2f)
-            if (!ScreenUtils.inScreen(x, y)) {
+            if (!validQingpingPoint(node, rect, x, y) || !ScreenUtils.inScreen(x, y)) {
                 return ActionResult(
                     action = action,
                     result = false,
@@ -79,9 +80,7 @@ sealed class ActionPerformer(val action: String) {
                             path, 0, ViewConfiguration.getTapTimeout().toLong()
                         )
                     )
-                    A11yService.instance?.dispatchGesture(
-                        gestureDescription.build(), null, null
-                    ) != null
+                    dispatchQingpingGesture(gestureDescription.build(), ViewConfiguration.getTapTimeout().toLong())
                 },
                 position = x to y
             )
@@ -131,7 +130,7 @@ sealed class ActionPerformer(val action: String) {
             val x = p?.first ?: ((rect.right + rect.left) / 2f)
             val y = p?.second ?: ((rect.bottom + rect.top) / 2f)
             // 某些系统的 ViewConfiguration.getLongPressTimeout() 返回 300 , 这将导致触发普通的 click 事件
-            if (!ScreenUtils.inScreen(x, y)) {
+            if (!validQingpingPoint(node, rect, x, y) || !ScreenUtils.inScreen(x, y)) {
                 return ActionResult(
                     action = action,
                     result = false,
@@ -152,13 +151,7 @@ sealed class ActionPerformer(val action: String) {
                             path, 0, LONG_DURATION
                         )
                     )
-                    (A11yService.instance?.dispatchGesture(
-                        gestureDescription.build(), null, null
-                    ) != null).apply {
-                        if (this) {
-                            delay(LONG_DURATION)
-                        }
-                    }
+                    dispatchQingpingGesture(gestureDescription.build(), LONG_DURATION)
                 },
                 position = x to y
             )
@@ -226,7 +219,9 @@ sealed class ActionPerformer(val action: String) {
             val startY = startP.second
             val endX = endP.first
             val endY = endP.second
-            if (!(ScreenUtils.inScreen(startX, startY) && ScreenUtils.inScreen(endX, endY))) {
+            if (!(validQingpingPoint(node, rect, startX, startY) &&
+                        validQingpingPoint(node, rect, endX, endY) &&
+                        ScreenUtils.inScreen(startX, startY) && ScreenUtils.inScreen(endX, endY))) {
                 return ActionResult(
                     action = action,
                     result = false,
@@ -260,13 +255,7 @@ sealed class ActionPerformer(val action: String) {
                 )
                 ActionResult(
                     action = action,
-                    result = (A11yService.instance?.dispatchGesture(
-                        gestureDescription.build(), null, null
-                    ) != null).apply {
-                        if (this) {
-                            delay(swipeArg.duration)
-                        }
-                    },
+                    result = dispatchQingpingGesture(gestureDescription.build(), swipeArg.duration),
                     position = endX to endY,
                 )
             }

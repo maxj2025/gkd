@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.update
 import li.songe.gkd.app
 import li.songe.gkd.data.RawSubscription
 import li.songe.gkd.data.SubsItem
@@ -15,6 +16,12 @@ import li.songe.gkd.util.toast
 import li.songe.gkd.util.persistSubscription
 
 class QingpingVm : ViewModel() {
+    fun setAutoRestore(enabled: Boolean) {
+        li.songe.gkd.store.storeFlow.update { state -> state.copy(qingpingAutoRestore = enabled,
+                qingpingManualOff = if (enabled) false else state.qingpingManualOff)
+        }
+        if (enabled) requestQingpingRestore()
+    }
     val stats = DbSet.qingpingStatDao.observe()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 

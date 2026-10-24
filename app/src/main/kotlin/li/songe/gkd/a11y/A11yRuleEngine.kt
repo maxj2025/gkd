@@ -20,6 +20,14 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import li.songe.gkd.META
 import li.songe.gkd.qingping.QingpingPolicy
+import li.songe.gkd.qingping.QingpingQueryRunner
+import li.songe.gkd.qingping.QingpingFollowup
+import li.songe.gkd.qingping.QingpingOutcome
+import li.songe.gkd.qingping.QingpingOutcomePolicy
+import li.songe.gkd.qingping.qingpingReadableTree
+import li.songe.gkd.db.DbSet
+import li.songe.gkd.util.LogUtils
+import kotlinx.coroutines.CancellationException
 import li.songe.gkd.data.ActionPerformer
 import li.songe.gkd.data.ActionResult
 import li.songe.gkd.data.AppRule
@@ -244,8 +252,19 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         }
     }
 
-    @Volatile
-    private var querying = false
+    private val queryRunner = QingpingQueryRunner()
+    private val followup = QingpingFollowup()
+    private val pendingDelayRules = linkedSetOf<ResolvedRule>()
+
+    private fun hasQingpingRules(): Boolean {
+        val top = topActivityFlow.value
+        val settings = storeFlow.value
+        return isInteractive && settings.enableMatch && activityRuleFlow.value.currentRules.any { rule ->
+            QingpingPolicy.allows(QingpingPolicy.kind(rule.g.group.name),
+                top.appId in settings.qingpingExitApps, true,
+                System.currentTimeMillis() - appChangeTime, rule is AppRule)
+        }
+    }
 
     @Synchronized
     private fun startQueryJob(
@@ -254,13 +273,20 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         byDelayRule: ResolvedRule? = null,
     ) {
         if (!effective) return
-        if (!storeFlow.value.enableMatch) return
-        if (activityRuleFlow.value.currentRules.isEmpty()) return
-        if (querying) return
+        if (!hasQingpingRules()) { followup.cancel(); pendingDelayRules.clear(); return }
+        val activeRules = activityRuleFlow.value.currentRules
+        pendingDelayRules.removeAll { delayed -> activeRules.none { it === delayed } }
+        if (byDelayRule != null && activeRules.any { it === byDelayRule }) pendingDelayRules.add(byDelayRule)
+        val pendingDelay = pendingDelayRules.firstOrNull()
         // 无障碍从零启动时获取 safeActiveWindow 非常耗时
         if (byEvent == null && service.justStarted && !hasOthersService) return checkFutureStartJob()
-        scope.launchTry(queryDispatcher) {
-            querying = true
+        val started = queryRunner.tryStart(scope, queryDispatcher, onComplete = {
+            val hasDelay = synchronized(this) { pendingDelayRules.isNotEmpty() }
+            if ((hasDelay || synchronized(queryEvents) { queryEvents.isNotEmpty() }) && hasQingpingRules()) {
+                followup.replace(scope, 0) { startQueryJob() }
+            } else checkFutureStartJob()
+        }) {
+            followup.cancel()
             val st = if (META.debuggable) System.currentTimeMillis() else 0L
             try {
                 if (META.debuggable) {
@@ -269,32 +295,28 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                         "startQueryJob start byEvent=${byEvent != null}, byForced=$byForced, byDelayRule=${byDelayRule != null}"
                     )
                 }
-                queryAction(byEvent, byForced, byDelayRule)
-            } finally {
-                checkFutureStartJob()
+                queryAction(byEvent, byForced, pendingDelay)
+            } catch (e: CancellationException) { throw e }
+            catch (e: Throwable) { LogUtils.d(e) }
+            finally {
                 if (META.debuggable) {
                     val et = System.currentTimeMillis() - st
                     Log.d("A11yRuleEngine", "startQueryJob end $et ms")
                 }
-                querying = false
             }
         }
+        if (started && pendingDelay != null) pendingDelayRules.remove(pendingDelay)
     }
 
     private fun checkFutureStartJob() {
-        if (!isInteractive) return
+        if (!effective || !hasQingpingRules()) { followup.cancel(); return }
         val t = System.currentTimeMillis()
-        if (t - appChangeTime > QingpingPolicy.STARTUP_WINDOW_MS) return
+        if (t - appChangeTime > QingpingPolicy.STARTUP_WINDOW_MS &&
+            topActivityFlow.value.appId !in storeFlow.value.qingpingExitApps) return
         if (t - lastTriggerTime < 3000L || t - appChangeTime < 3000L) {
-            scope.launch(actionDispatcher) {
-                delay(300)
-                startQueryJob()
-            }
+            followup.replace(scope, 300) { startQueryJob() }
         } else if (activityRuleFlow.value.hasFeatureAction) {
-            scope.launch(actionDispatcher) {
-                delay(300)
-                startQueryJob(byForced = true)
-            }
+            followup.replace(scope, 500) { startQueryJob(byForced = true) }
         }
     }
 
@@ -308,10 +330,7 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                 updateTopActivity(rightAppId, null)
             }
         }
-        scope.launch(actionDispatcher) {
-            delay(300)
-            startQueryJob()
-        }
+        followup.replace(scope, 300) { startQueryJob() }
     }
 
     private suspend fun queryAction(
@@ -356,6 +375,8 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         }
         val activityRule = synchronized(topActivityFlow) { activityRuleFlow.value }
         activityRule.currentRules.forEach { rule ->
+            if (!QingpingPolicy.allows(QingpingPolicy.kind(rule.g.group.name), exitEnabled,
+                    isInteractive, System.currentTimeMillis() - appChangeTime, rule is AppRule)) return@forEach
             if (rule.status == RuleStatus.Status3 && rule.matchDelayJob.value == null) {
                 rule.matchDelayJob.value = scope.launch(actionDispatcher) {
                     delay(rule.matchDelay)
@@ -432,19 +453,62 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
             if (rule.status != RuleStatus.StatusOk) break
             if (checkOutDate(activityRule, tempStateEvent)) break
             val topActivity = activityRule.topActivity
+            if (!isInteractive || !storeFlow.value.enableMatch) return
+            if (target.packageName?.toString() != topActivity.appId || !target.isVisibleToUser) continue
+            // Recheck the actual window immediately before acting on a previously matched node.
+            val freshRoot = getTimeoutActiveWindow() ?: return
+            if (freshRoot.packageName?.toString() != topActivity.appId) return
+            if (checkOutDate(activityRule, tempStateEvent)) return
+            if (!target.refresh() || target.packageName?.toString() != topActivity.appId || !target.isVisibleToUser) continue
+            val freshContext = A11yContext(this, interruptable = false).apply { rootCache.value = freshRoot }
+            if (freshContext.queryRule(rule, freshRoot) != target || freshContext.incompleteRead) continue
+            if (checkOutDate(activityRule, tempStateEvent)) return
+            if (!effective || !QingpingPolicy.canAct(QingpingPolicy.kind(rule.g.group.name),
+                    topActivity.appId in storeFlow.value.qingpingExitApps, isInteractive,
+                    System.currentTimeMillis() - appChangeTime, rule is AppRule,
+                    storeFlow.value.enableMatch, freshRoot.windowId == target.windowId)) return
             val actionResult = rule.performAction(target)
             if (actionResult.result) {
                 rule.trigger()
-                scope.launch(actionDispatcher) {
-                    delay(300)
-                    startQueryJob()
-                }
                 if (actionResult.action != ActionPerformer.None.action) {
                     showActionToast(rule)
                 }
                 addActionLog(rule, topActivity, target, actionResult)
+                if (actionResult.action != ActionPerformer.None.action) {
+                    val outcome = verifyQingpingOutcome(rule, topActivity.appId)
+                    DbSet.qingpingStatDao.record(topActivity.appId, "verify_${outcome.name.lowercase()}", System.currentTimeMillis())
+                    return // Finish verification before considering another real action.
+                }
+                // A none action can arm preKeys; continue the chain without requiring a new event.
             }
         }
+    }
+
+    private suspend fun verifyQingpingOutcome(rule: ResolvedRule, appId: String): QingpingOutcome {
+        repeat(2) { sample ->
+            delay(if (sample == 0) 300L else 150L)
+            if (!isInteractive || !storeFlow.value.enableMatch || !effective) return QingpingOutcome.UNKNOWN
+            val root = getTimeoutActiveWindow() ?: return QingpingOutcome.UNKNOWN
+            val packageName = root.packageName?.toString() ?: return QingpingOutcome.UNKNOWN
+            if (packageName != appId) return QingpingOutcome.EXTERNAL
+            val available = synchronized(topActivityFlow) {
+                activityRuleFlow.value.priorityRules.any { it === rule }
+            }
+            if (!available) return QingpingOutcome.UNKNOWN
+            val readable = runCatching {
+                root.refresh() && qingpingReadableTree(root, { it.childCount }, { n, i -> n.getChild(i) },
+                    { it.isVisibleToUser && (!it.text.isNullOrBlank() || !it.contentDescription.isNullOrBlank()) })
+            }.getOrDefault(false)
+            if (!readable) return QingpingOutcome.UNKNOWN
+            val context = A11yContext(this, interruptable = false).apply { rootCache.value = root }
+            val present = try { context.queryRule(rule, root) != null }
+                catch (e: CancellationException) { throw e }
+                catch (_: Throwable) { return QingpingOutcome.UNKNOWN }
+            if (context.incompleteRead) return QingpingOutcome.UNKNOWN
+            val outcome = QingpingOutcomePolicy.decide(true, available, readable, present)
+            if (outcome != QingpingOutcome.EXIT_GONE) return outcome
+        }
+        return QingpingOutcome.EXIT_GONE
     }
 
     private fun checkOutDate(

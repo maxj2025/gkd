@@ -27,13 +27,14 @@ fun formatTimeAgo(timestamp: Long): String {
     }
 }
 
-private val formatDateMap by lazy { hashMapOf<String, SimpleDateFormat>() }
+private val formatDateMap = ThreadLocal.withInitial { hashMapOf<String, SimpleDateFormat>() }
 
 fun Long.format(formatStr: String): String {
-    var df = formatDateMap[formatStr]
+    val cache = checkNotNull(formatDateMap.get())
+    var df = cache[formatStr]
     if (df == null) {
         df = SimpleDateFormat(formatStr, Locale.getDefault())
-        formatDateMap[formatStr] = df
+        cache[formatStr] = df
     }
     return df.format(this)
 }

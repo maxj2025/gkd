@@ -20,7 +20,7 @@ try {
     $env:ORG_GRADLE_PROJECT_GKD_KEY_PASSWORD = $env:QINGPING_STORE_PASS
     $qingTasks = @(':app:assembleGkdRelease')
     if (-not $SkipTests) { $qingTasks += @(':app:testGkdDebugUnitTest', ':app:lintGkdRelease') }
-    & ./gradlew.bat @qingTasks --max-workers=2 --console=plain
+    & ./gradlew.bat @qingTasks --no-watch-fs --max-workers=2 --console=plain
     if ($LASTEXITCODE -ne 0) { throw '构建或检查未通过' }
 } finally {
     Remove-Item Env:QINGPING_STORE_PASS,Env:ORG_GRADLE_PROJECT_GKD_STORE_PASSWORD,Env:ORG_GRADLE_PROJECT_GKD_KEY_PASSWORD -ErrorAction SilentlyContinue

@@ -46,6 +46,7 @@ fun QingpingCard() {
     val subs by subsMapFlow.collectAsStateWithLifecycle()
     val apps by appInfoMapFlow.collectAsStateWithLifecycle()
     val store by storeFlow.collectAsStateWithLifecycle()
+    val securePermission by li.songe.gkd.permission.writeSecureSettingsState.stateFlow.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val mainVm = LocalMainViewModel.current
     var showStats by remember { mutableStateOf(false) }
@@ -54,10 +55,21 @@ fun QingpingCard() {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(if (store.enableStatusService) "清屏 · 常驻通知已开启" else "清屏 · 低打扰模式",
                 style = MaterialTheme.typography.titleLarge)
-            Text(stats?.let { "累计成功执行 ${it.sumOf { row -> row.count }} 次" } ?: "正在读取本地统计…")
+            Text(stats?.let { "累计完成操作 ${it.filter { row -> row.kind == "splash" || row.kind == "exit" }.sumOf { row -> row.count }} 次" } ?: "正在读取本地统计…")
             Text("开屏匹配限进入应用后 15 秒；熄屏停止匹配。广告跳转防护需按应用开启。",
                 style = MaterialTheme.typography.bodyMedium)
             TextButton(onClick = { showStats = true }) { Text("统计与应用防护") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("开机与解锁后有限恢复", Modifier.weight(1f))
+                Switch(checked = store.qingpingAutoRestore, onCheckedChange = vm::setAutoRestore)
+            }
+            if (store.qingpingAutoRestore) {
+                Text(if (securePermission) "写入安全设置：已授权" else "尚未授权写入安全设置，自动恢复不会执行。",
+                    style = MaterialTheme.typography.bodySmall)
+                Text("需要一次授予写入安全设置权限及允许自启动；仅尝试恢复，不保证清后台存活。应用内主动关闭服务后暂停恢复。",
+                    style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = { mainVm.navigatePage(li.songe.gkd.ui.AuthA11yRoute) }) { Text("查看授权与工作模式") }
+            }
             if (!basicInstalled) {
                 Text("内置规则只识别“跳过广告”按钮，可离线使用；普通“跳过”需添加已适配的订阅规则。")
                 TextButton(onClick = vm::installBasicRules) { Text("启用内置基础规则") }
@@ -76,7 +88,7 @@ fun QingpingCard() {
             a.groups.any { QingpingPolicy.kind(it.name) == "exit" }
         }.map { it.id }.filter { apps.containsKey(it) }.toSet()
         val allIds = (grouped.keys + exitApps + store.qingpingExitApps).sortedWith(
-            compareByDescending<String> { id -> grouped[id]?.sumOf { it.count } ?: 0 }
+            compareByDescending<String> { id -> grouped[id]?.filter { it.kind == "splash" || it.kind == "exit" }?.sumOf { it.count } ?: 0 }
                 .thenBy { apps[it]?.name ?: it }
         )
         AlertDialog(
@@ -85,7 +97,7 @@ fun QingpingCard() {
             text = {
                 LazyColumn(Modifier.heightIn(max = 450.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     item {
-                        Text("次数表示自动操作成功返回，不保证广告已消失。累计统计不随详细记录清理而删除。")
+                        Text("操作数表示节点操作返回成功或手势完成，不保证广告已消失。复查结果独立累计；两次未找到原出口仍不等于广告请求被拦截。")
                         Text("跳转防护需要同时启用订阅中的对应规则；应用开关不会覆盖你关闭的类别或规则。")
                         if (stats == null) Text("正在读取…")
                         else if (allIds.isEmpty()) Text("暂无记录。成功跳过广告后会显示应用统计。")
@@ -95,6 +107,11 @@ fun QingpingCard() {
                             Text(apps[id]?.name ?: id, style = MaterialTheme.typography.titleSmall)
                             val rows = grouped[id].orEmpty()
                             Text("跳过 ${rows.filter { it.kind == "splash" }.sumOf { it.count }} 次 · 退出 ${rows.filter { it.kind == "exit" }.sumOf { it.count }} 次")
+                            if (rows.any { it.kind.startsWith("verify_") }) {
+                                fun count(kind: String) = rows.filter { it.kind == "verify_$kind" }.sumOf { it.count }
+                                Text("复查：原出口消失 ${count("exit_gone")} · 仍存在 ${count("remains")} · 未知 ${count("unknown")} · 跨应用 ${count("external")}",
+                                    style = MaterialTheme.typography.bodySmall)
+                            }
                             rows.maxOfOrNull { it.lastTime }?.let { time ->
                                 Text("最近执行 ${time.format("MM-dd HH:mm:ss")}", style = MaterialTheme.typography.bodySmall)
                             }

@@ -42,6 +42,8 @@ class A11yContext(
     private val a11yEngine: A11yRuleEngine,
     private val interruptable: Boolean = true,
 ) {
+    var incompleteRead: Boolean = false
+        private set
     private var childCache =
         LruCache<Pair<AccessibilityNodeInfo, Int>, AccessibilityNodeInfo>(MAX_CACHE_SIZE)
     private var indexCache = LruCache<AccessibilityNodeInfo, Int>(MAX_CACHE_SIZE)
@@ -135,7 +137,9 @@ class A11yContext(
 
     private fun getA11Child(node: AccessibilityNodeInfo, index: Int): AccessibilityNodeInfo? {
         guardInterrupt()
-        return node.getChild(index)?.setGeneratedTime()
+        return node.getChild(index)?.setGeneratedTime().also {
+            if (it == null && index in 0 until node.childCount) incompleteRead = true
+        }
     }
 
     private fun getA11Parent(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
@@ -244,6 +248,7 @@ class A11yContext(
 
     private fun getCacheChildren(node: AccessibilityNodeInfo?): Sequence<AccessibilityNodeInfo> {
         if (node == null) return emptySequence()
+        if (node.childCount > MAX_CHILD_SIZE) incompleteRead = true
         return sequence {
             repeat(node.childCount.coerceAtMost(MAX_CHILD_SIZE)) { index ->
                 val child = getCacheChild(node, index) ?: return@sequence

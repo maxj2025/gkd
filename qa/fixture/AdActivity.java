@@ -21,10 +21,14 @@ public class AdActivity extends Activity {
         Button skip = new Button(this);
         skip.setText(getIntent().getBooleanExtra("ordinary", false) ? "跳过" : "跳过广告");
         skip.setOnClickListener(v -> {
+            if (getIntent().getBooleanExtra("noEffect", false)) return;
             title.setText("已进入内容页");
             box.removeView(skip);
         });
         box.addView(skip);
         setContentView(box);
+        if (getIntent().getBooleanExtra("lateAd", false)) {
+            title.postDelayed(() -> title.setText("稍后广告测试"), getIntent().getLongExtra("adDelayMs", 16000));
+        }
     }
 }

@@ -18,6 +18,8 @@ data class SettingsStore(
     val enableStatusService: Boolean = false,
     val excludeFromRecents: Boolean = true,
     val qingpingExitApps: Set<String> = emptySet(),
+    val qingpingAutoRestore: Boolean = false,
+    val qingpingManualOff: Boolean = false,
     val captureScreenshot: Boolean = false,
     val screenshotTargetAppId: String = "",
     val screenshotEventSelector: String = "",

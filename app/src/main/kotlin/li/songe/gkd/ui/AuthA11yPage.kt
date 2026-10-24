@@ -74,6 +74,15 @@ data object AuthA11yRoute : NavKey
 fun AuthA11yPage() {
     val mainVm = LocalMainViewModel.current
     val vm = viewModel<AuthA11yVm>()
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    androidx.compose.runtime.DisposableEffect(lifecycle, vm) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) vm.refreshPermissions()
+        }
+        lifecycle.addObserver(observer)
+        vm.refreshPermissions()
+        onDispose { lifecycle.removeObserver(observer) }
+    }
     val showCopyDlg by vm.showCopyDlgFlow.collectAsState()
     val writeSecureSettings by writeSecureSettingsState.stateFlow.collectAsState()
     val a11yRunning by A11yService.isRunning.collectAsState()
