@@ -10,6 +10,8 @@ import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 import androidx.room.migration.AutoMigrationSpec
 import li.songe.gkd.app
+import li.songe.gkd.qingping.QingpingStat
+import li.songe.gkd.qingping.QingpingStatDao
 import li.songe.gkd.data.A11yEventLog
 import li.songe.gkd.data.ActionLog
 import li.songe.gkd.data.ActivityLog
@@ -23,7 +25,7 @@ import li.songe.gkd.util.dbFolder
 import li.songe.gkd.util.json
 
 @Database(
-    version = 14,
+    version = 15,
     entities = [
         SubsItem::class,
         Snapshot::class,
@@ -34,6 +36,7 @@ import li.songe.gkd.util.json
         AppConfig::class,
         AppVisitLog::class,
         A11yEventLog::class,
+        QingpingStat::class,
     ],
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
@@ -49,10 +52,12 @@ import li.songe.gkd.util.json
         AutoMigration(from = 11, to = 12),
         AutoMigration(from = 12, to = 13),
         AutoMigration(from = 13, to = 14),
+        AutoMigration(from = 14, to = 15),
     ]
 )
 @TypeConverters(DbConverters::class)
 abstract class AppDb : RoomDatabase() {
+    abstract fun qingpingStatDao(): QingpingStatDao
     abstract fun subsItemDao(): SubsItem.SubsItemDao
     abstract fun snapshotDao(): Snapshot.SnapshotDao
     abstract fun subsConfigDao(): SubsConfig.SubsConfigDao
@@ -109,6 +114,7 @@ class DbConverters {
 }
 
 object DbSet {
+    val qingpingStatDao get() = db.qingpingStatDao()
     private val db by lazy {
         Room.databaseBuilder(
             app,

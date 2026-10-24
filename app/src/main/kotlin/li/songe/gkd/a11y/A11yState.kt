@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import li.songe.gkd.META
+import li.songe.gkd.qingping.QingpingPolicy
 import li.songe.gkd.app
 import li.songe.gkd.appScope
 import li.songe.gkd.data.ActionLog
@@ -301,6 +302,12 @@ fun addActionLog(
             ctime = ctime,
         )
         DbSet.actionLogDao.insert(actionLog)
+        if (QingpingPolicy.shouldCount(actionResult.result, actionResult.action)) {
+            val kind = QingpingPolicy.kind(rule.g.group.name)
+            if (kind != "other") {
+                DbSet.qingpingStatDao.record(topActivity.appId, kind, ctime)
+            }
+        }
         if (actionCountFlow.value % 100 == 0L) {
             DbSet.actionLogDao.deleteKeepLatest()
         }

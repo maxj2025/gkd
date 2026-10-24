@@ -81,11 +81,9 @@ data class AppMeta(
     val appId: String = app.packageName!!,
     val appName: String = app.getString(R.string.app_name)
 ) {
-    val commitUrl = "https://github.com/gkd-kit/gkd/".run {
-        plus(if (tagName != null) "tree/$tagName" else "commit/$commitId")
-    }
+    val commitUrl = "https://github.com/gkd-kit/gkd/tree/5a00f844989471458e4cf4601acb3f4710438f9a"
     val isGkdChannel get() = channel == "gkd"
-    val updateEnabled get() = isGkdChannel
+    val updateEnabled get() = false // Fork updates must never install an upstream APK.
     val isBeta get() = versionName.contains("beta")
 }
 

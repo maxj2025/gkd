@@ -19,6 +19,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import li.songe.gkd.META
+import li.songe.gkd.qingping.QingpingPolicy
 import li.songe.gkd.data.ActionPerformer
 import li.songe.gkd.data.ActionResult
 import li.songe.gkd.data.AppRule
@@ -121,6 +122,12 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         onA11yFeatEvent(event)
         if (event.eventType == CONTENT_CHANGED) {
             if (!isInteractive) return // 屏幕关闭后仍然有无障碍事件 type:2048, time:8094, app:com.miui.aod, cls:android.widget.TextView
+            val currentAppId = topActivityFlow.value.appId
+            if (QingpingPolicy.shouldDropContent(
+                    event.packageName?.toString() == currentAppId,
+                    System.currentTimeMillis() - appChangeTime,
+                    storeFlow.value.qingpingExitApps.contains(currentAppId)
+                )) return
             if (event.packageName == systemUiAppId && event.packageName != topActivityFlow.value.appId) return
         }
         // 过滤部分输入法事件
@@ -275,7 +282,9 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
     }
 
     private fun checkFutureStartJob() {
+        if (!isInteractive) return
         val t = System.currentTimeMillis()
+        if (t - appChangeTime > QingpingPolicy.STARTUP_WINDOW_MS) return
         if (t - lastTriggerTime < 3000L || t - appChangeTime < 3000L) {
             scope.launch(actionDispatcher) {
                 delay(300)
@@ -310,6 +319,10 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         byForced: Boolean = false,
         delayRule: ResolvedRule? = null,
     ) {
+        val appId = topActivityFlow.value.appId
+        val age = System.currentTimeMillis() - appChangeTime
+        val exitEnabled = storeFlow.value.qingpingExitApps.contains(appId)
+        if (!isInteractive || (age > QingpingPolicy.STARTUP_WINDOW_MS && !exitEnabled)) return
         val tempStateEvent = latestStateEvent
         val newEvents = if (delayRule != null) {// 延迟规则不消耗事件
             null
@@ -375,6 +388,10 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
             }
         }
         for (rule in activityRule.priorityRules) { // 规则数量有可能过多导致耗时过长
+            if (!QingpingPolicy.allows(
+                    QingpingPolicy.kind(rule.g.group.name), exitEnabled, isInteractive,
+                    System.currentTimeMillis() - appChangeTime, rule is AppRule
+                )) continue
             if (!effective) return
             if (checkOutDate(activityRule, tempStateEvent)) break
             if (delayRule != null && delayRule !== rule) continue
@@ -414,9 +431,9 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
             }
             if (rule.status != RuleStatus.StatusOk) break
             if (checkOutDate(activityRule, tempStateEvent)) break
+            val topActivity = activityRule.topActivity
             val actionResult = rule.performAction(target)
             if (actionResult.result) {
-                val topActivity = topActivityFlow.value
                 rule.trigger()
                 scope.launch(actionDispatcher) {
                     delay(300)

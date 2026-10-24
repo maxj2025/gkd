@@ -22,5 +22,6 @@ local.properties
 
 /.cache
 /.kotlin
+/.local/
 
 /gradle/libs.versions.updates.toml

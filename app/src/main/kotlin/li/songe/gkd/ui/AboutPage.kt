@@ -208,7 +208,7 @@ fun AboutPage() {
 
             SettingItem(
                 imageVector = null,
-                title = "开源代码",
+                title = "上游 GKD 开源代码",
                 onClick = {
                     mainVm.openUrl(REPOSITORY_URL)
                 },

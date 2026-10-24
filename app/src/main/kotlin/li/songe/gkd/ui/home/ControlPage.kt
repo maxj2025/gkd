@@ -39,6 +39,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.Dispatchers
 import li.songe.gkd.MainActivity
+import li.songe.gkd.qingping.QingpingCard
 import li.songe.gkd.R
 import li.songe.gkd.data.SubsConfig
 import li.songe.gkd.permission.appOpsRestrictedFlow
@@ -221,6 +222,7 @@ fun useControlPage(): ScaffoldExt {
                 },
             )
 
+            QingpingCard()
             ServerStatusCard()
 
             PageItemCard(

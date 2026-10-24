@@ -42,7 +42,7 @@ fun TermsAcceptDialog() {
                 Text(
                     modifier = modifier,
                     text = buildAnnotatedString {
-                        append("感谢使用 GKD！您需要阅读并同意「")
+                        append("清屏基于开源 GKD 二次开发。统计默认保存在本机；订阅更新会访问你指定的服务器。高级功能中的快照分享可能上传屏幕内容，请按需使用。上游项目的「")
                         withLink(
                             LinkAnnotation.Url(
                                 ShortUrlSet.URL12,
@@ -60,14 +60,14 @@ fun TermsAcceptDialog() {
                         ) {
                             append("隐私政策")
                         }
-                        append("」才能继续使用, 请仔细阅读相关内容")
+                        append("」供了解上游功能；本应用不隶属于 GKD 官方。你可以随时暂停自动操作或撤销无障碍权限。")
                     },
                 )
             },
             "关于无障碍" to @Composable {
                 Text(
                     modifier = modifier,
-                    text = "GKD 请求使用系统「无障碍 API」获取屏幕信息, 以此基于用户自定义订阅规则执行自动化操作",
+                    text = "清屏需要无障碍权限读取界面并执行规则允许的点击或返回。规则可能失效或误触；请只导入可信规则。开屏匹配限进入应用后 15 秒，跳转防护需单独开启。隐藏任务卡片不会使服务免于系统清理，也无法在强行停止后保证运行。",
                 )
             }
         )

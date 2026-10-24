@@ -52,6 +52,7 @@
 
         <activity
             android:name=".MainActivity"
+            android:excludeFromRecents="true"
             android:enableOnBackInvokedCallback="false"
             android:exported="true"
             android:launchMode="singleTop"

@@ -23,8 +23,8 @@ data class GitInfo(
 }
 
 val gitInfo = GitInfo(
-    commitId = "git rev-parse HEAD".runCommand(),
-    commitTime = "git log -1 --format=%ct".runCommand() + "000",
+    commitId = runCatching { "git rev-parse HEAD".runCommand() }.getOrDefault("5a00f844989471458e4cf4601acb3f4710438f9a"),
+    commitTime = runCatching { "git log -1 --format=%ct".runCommand() }.getOrDefault("1779235200") + "000",
     tagName = runCatching { "git describe --tags --exact-match".runCommand() }.getOrNull(),
 )
 
@@ -68,9 +68,9 @@ android {
         minSdk = rootProject.ext["android.minSdk"] as Int
         targetSdk = rootProject.ext["android.targetSdk"] as Int
 
-        applicationId = "li.songe.gkd"
-        versionCode = 92
-        versionName = "1.12.1"
+        applicationId = "io.qingping.app"
+        versionCode = 1
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -118,12 +118,9 @@ android {
     }
 
     buildTypes {
-        all {
-            versionNameSuffix = gitInfo.versionNameSuffix
-        }
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            isMinifyEnabled = false
+            isShrinkResources = false
             isDebuggable = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

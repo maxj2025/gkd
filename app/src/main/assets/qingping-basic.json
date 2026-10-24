@@ -1,0 +1,20 @@
+{
+  "id": 20261024,
+  "name": "清屏基础开屏规则",
+  "version": 1,
+  "author": "清屏",
+  "globalGroups": [{
+    "key": 0,
+    "name": "开屏广告-明确跳过按钮",
+    "desc": "只点击可点击且文字明确为跳过广告的按钮，不处理系统应用；普通跳过按钮需使用已适配的应用规则。",
+    "enable": true,
+    "matchAnyApp": true,
+    "matchSystemApp": false,
+    "matchLauncher": false,
+    "matchTime": 15000,
+    "actionMaximum": 1,
+    "resetMatch": "app",
+    "actionCd": 15000,
+    "rules": [{"key": 0, "matches": "[clickable=true][text~='^跳过广告( ?[0-9]+[sS秒]?)?$']"}]
+  }]
+}

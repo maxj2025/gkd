@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import li.songe.gkd.appScope
+import li.songe.gkd.qingping.QingpingPolicy
 import li.songe.gkd.data.AppRule
 import li.songe.gkd.data.CategoryConfig
 import li.songe.gkd.data.GlobalRule
@@ -121,7 +122,10 @@ val usedSubsEntriesFlow by lazy {
 }
 
 fun updateSubscription(subscription: RawSubscription) {
-    appScope.launchTry {
+    appScope.launchTry { persistSubscription(subscription) }
+}
+
+suspend fun persistSubscription(subscription: RawSubscription) {
         updateSubsMutex.withStateLock {
             val subsId = subscription.id
             val subsName = subscription.name
@@ -138,6 +142,12 @@ fun updateSubscription(subscription: RawSubscription) {
                 subscription
             }
             newMap[subsId] = nextSubsRaw
+            withContext(Dispatchers.IO) {
+                cleanupSubsConfig(subsId, nextSubsRaw)
+                subsFolder.resolve("${subsId}.json")
+                    .writeText(json.encodeToString(nextSubsRaw))
+                DbSet.subsItemDao.updateMtime(subsId, System.currentTimeMillis())
+            }
             subsMapFlow.value = newMap
             if (subsLoadErrorsFlow.value.contains(subsId)) {
                 subsLoadErrorsFlow.update {
@@ -146,15 +156,8 @@ fun updateSubscription(subscription: RawSubscription) {
                     }
                 }
             }
-            withContext(Dispatchers.IO) {
-                cleanupSubsConfig(subsId, nextSubsRaw)
-                DbSet.subsItemDao.updateMtime(subsId, System.currentTimeMillis())
-                subsFolder.resolve("${subsId}.json")
-                    .writeText(json.encodeToString(nextSubsRaw))
-            }
             LogUtils.d("更新订阅文件:id=${subsId},name=${subsName}")
         }
-    }
 }
 
 fun deleteSubscription(vararg subsIds: Long) {
@@ -268,6 +271,7 @@ val ruleSummaryFlow by lazy {
             val subGlobalGroupToRules =
                 mutableMapOf<RawSubscription.RawGlobalGroup, List<GlobalRule>>()
             rawSubs.globalGroups.filter { g ->
+                QingpingPolicy.kind(g.name) == "splash" &&
                 (subGlobalSubsConfigs.find { c -> c.groupKey == g.key }?.enable
                     ?: g.enable ?: true) && g.valid
             }.forEach { groupRaw ->
@@ -313,12 +317,13 @@ val ruleSummaryFlow by lazy {
                     val category = rawSubs.getCategory(group.name)
                     val categoryConfig =
                         subCategoryConfigs.find { c -> c.categoryKey == category?.key }
+                    val policyKind = QingpingPolicy.kind(group.name)
                     val enable = getGroupEnable(
                         group,
                         config,
                         category,
                         categoryConfig
-                    ) && group.valid
+                    ) && group.valid && policyKind != "other"
                     ResolvedAppGroup(
                         group = group,
                         subscription = rawSubs,
