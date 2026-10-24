@@ -11,6 +11,7 @@ import android.view.accessibility.AccessibilityWindowInfo
 import kotlinx.atomicfu.atomic
 import kotlinx.atomicfu.getAndUpdate
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -49,6 +50,7 @@ import li.songe.gkd.util.launchTry
 import li.songe.gkd.util.runMainPost
 import li.songe.gkd.util.showActionToast
 import li.songe.gkd.util.systemUiAppId
+import li.songe.gkd.util.ruleSummaryFlow
 import li.songe.selector.MatchOption
 import li.songe.selector.Selector
 import java.util.concurrent.Executors
@@ -70,11 +72,25 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         AutomatorModeOption.A11yMode -> uiAutomationFlow.value != null
         AutomatorModeOption.AutomationMode -> A11yService.instance != null
     }
+    private var summaryJob: Job? = null
 
     fun onA11yConnected() {
         val serviceTime = System.currentTimeMillis()
         latestServiceMode.value = service.mode.value
         latestServiceTime.value = serviceTime
+        // Start rule resolution without opening the UI. A foreground event may arrive
+        // before subscriptions resolve; refresh that same page when they become ready.
+        summaryJob?.cancel()
+        summaryJob = scope.launch(eventDispatcher) {
+            ruleSummaryFlow.collect {
+                if (!effective) return@collect
+                synchronized(topActivityFlow) {
+                    val top = topActivityFlow.value
+                    if (top.appId.isNotEmpty()) updateTopActivity(top.appId, top.activityId)
+                }
+                startQueryJob()
+            }
+        }
         if (storeFlow.value.enableBlockA11yAppList && !actualBlockA11yAppList.contains(topAppIdFlow.value)) {
             startQueryJob(byForced = true)
         }

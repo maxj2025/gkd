@@ -164,7 +164,8 @@ fun updateTopActivity(
             if (t - lastActivityForceUpdateTime < 1000) return
             if (activityId != null && t - lastActivityForceUpdateTime < 3000) return
         }
-        if (isSame && t - lastActivityUpdateTime < 1000) return
+        if (isSame && t - lastActivityUpdateTime < 1000 &&
+            oldActivityRule.ruleSummary === ruleSummaryFlow.value) return
     }
     val number = if (isSame) {
         oldActivity.number + 1

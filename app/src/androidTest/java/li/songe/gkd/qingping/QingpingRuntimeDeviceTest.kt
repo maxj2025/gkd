@@ -40,6 +40,36 @@ class QingpingRuntimeDeviceTest {
     @Test fun real_coordinate_gesture_completes_and_exit_is_verified() = runBlocking { checkFixture(false) }
     @Test fun ignored_coordinate_click_is_recorded_as_remaining_not_exit() = runBlocking { checkFixture(true) }
 
+    @Test fun rules_loaded_after_foreground_event_run_without_reopening_app() = runBlocking {
+        bindService()
+        val previous = storeFlow.value
+        val id = 20261030L
+        val fixture = "io.qingping.fixture"
+        try {
+            storeFlow.update { it.copy(enableMatch = true, qingpingAutoRestore = false) }
+            shell("input keyevent 3")
+            delay(400)
+            app.startActivity(Intent().setComponent(ComponentName(fixture, "$fixture.AdActivity"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                .putExtra("ordinary", true))
+            withTimeout(8000) { while (li.songe.gkd.a11y.topActivityFlow.value.appId != fixture) delay(50) }
+            delay(1200)
+            val appChangedAt = li.songe.gkd.a11y.appChangeTime
+            val before = DbSet.qingpingStatDao.get(fixture, "splash")?.count ?: 0
+            persistSubscription(RawSubscription.parse("""{id:20261030,name:'异步加载回归',version:1,apps:[{id:'io.qingping.fixture',groups:[
+                {key:0,name:'开屏广告-异步加载',enable:true,actionMaximum:1,rules:[{key:0,matches:"[text='跳过']",action:'clickCenter'}]}]}]}"""))
+            DbSet.subsItemDao.insertOrIgnore(SubsItem(id = id, enable = true, enableUpdate = false, order = 1))
+            withTimeout(6500) {
+                while ((DbSet.qingpingStatDao.get(fixture, "splash")?.count ?: 0) == before) delay(100)
+            }
+            assertEquals(appChangedAt, li.songe.gkd.a11y.appChangeTime)
+            assertTrue(ui.rootInActiveWindow.findAccessibilityNodeInfosByText("已进入内容页").isNotEmpty())
+        } finally {
+            deleteSubscription(id)
+            storeFlow.value = previous
+        }
+    }
+
     private suspend fun checkFixture(noEffect: Boolean) {
         bindService()
         val previous = storeFlow.value
