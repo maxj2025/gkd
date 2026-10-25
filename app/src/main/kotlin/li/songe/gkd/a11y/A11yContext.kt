@@ -1,5 +1,7 @@
 package li.songe.gkd.a11y
 
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import android.util.Log
 import android.util.LruCache
 import android.view.accessibility.AccessibilityNodeInfo
@@ -116,7 +118,10 @@ class A11yContext(
     var interruptKey = 0
     private var interruptInnerKey = 0
 
+    var cancellationJob: Job? = null
+
     private fun guardInterrupt() {
+        cancellationJob?.ensureActive()
         if (!interruptable) return
         if (interruptInnerKey == interruptKey) return
         interruptInnerKey = interruptKey
@@ -500,6 +505,7 @@ class A11yContext(
         selector: Selector,
         option: MatchOption,
     ): AccessibilityNodeInfo? {
+        guardInterrupt()
         if (selector.isMatchRoot) {
             return selector.match(
                 getCacheRoot() ?: return null,

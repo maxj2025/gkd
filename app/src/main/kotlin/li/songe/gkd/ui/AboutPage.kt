@@ -35,7 +35,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -66,7 +65,6 @@ import li.songe.gkd.ui.component.SettingItem
 import li.songe.gkd.ui.component.TextListDialog
 import li.songe.gkd.ui.component.TextMenu
 import li.songe.gkd.ui.component.waitResult
-import li.songe.gkd.ui.share.LocalDarkTheme
 import li.songe.gkd.ui.share.LocalMainViewModel
 import li.songe.gkd.ui.share.asMutableState
 import li.songe.gkd.ui.style.EmptyHeight
@@ -390,8 +388,6 @@ private fun exportPlayTipTemplate(): AnnotatedString {
 private fun AnimatedLogoIcon(
     modifier: Modifier = Modifier
 ) {
-    val darkTheme = LocalDarkTheme.current
-    val colorRid = if (darkTheme) R.color.better_white else R.color.better_black
     var atEnd by remember { mutableStateOf(false) }
     val animation = AnimatedImageVector.animatedVectorResource(id = R.drawable.ic_anim_logo)
     val painter = rememberAnimatedVectorPainter(
@@ -408,6 +404,6 @@ private fun AnimatedLogoIcon(
         modifier = modifier,
         painter = painter,
         contentDescription = null,
-        tint = colorResource(colorRid),
+        tint = MaterialTheme.colorScheme.primary,
     )
 }

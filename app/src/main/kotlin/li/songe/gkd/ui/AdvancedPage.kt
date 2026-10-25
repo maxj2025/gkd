@@ -448,6 +448,17 @@ fun AdvancedPage() {
                         }
                     )
                     TextSwitch(
+                        title = "允许局域网访问",
+                        subtitle = if (store.httpServerAllowLan)
+                            "已开启；同一网络设备可访问未认证的调试接口"
+                        else
+                            "默认仅本机访问；开启后允许同一网络设备连接",
+                        checked = store.httpServerAllowLan,
+                        onCheckedChange = { enabled ->
+                            storeFlow.update { it.copy(httpServerAllowLan = enabled) }
+                        },
+                    )
+                    TextSwitch(
                         title = "清除订阅",
                         subtitle = "关闭服务时删除内存订阅",
                         checked = store.autoClearMemorySubs,

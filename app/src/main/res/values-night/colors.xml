@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background_tint">@color/better_black</color>
-    <color name="ic_launcher_foreground_tint">@color/better_white</color>
+    <color name="qingping_primary">#7FDCCA</color>
+    <color name="qingping_primary_dark">#00201C</color>
+    <color name="qingping_accent">#006B5F</color>
+    <color name="ic_launcher_background_tint">#0D201C</color>
+    <color name="ic_launcher_foreground_tint">#E6FFF9</color>
 </resources>

@@ -10,6 +10,12 @@ import kotlin.coroutines.resume
 /** Occupy the slot before dispatch, release it even if cancellation precedes execution. */
 class QingpingQueryRunner {
     private var owner: Any? = null
+    private var activeJob: Job? = null
+
+    fun cancel() {
+        val job = synchronized(this) { activeJob }
+        job?.cancel()
+    }
 
     @Synchronized
     fun tryStart(
@@ -22,8 +28,9 @@ class QingpingQueryRunner {
         val token = Any()
         owner = token
         val job = scope.launch(dispatcher, start = CoroutineStart.LAZY, block = block)
+        activeJob = job
         job.invokeOnCompletion {
-            synchronized(this) { if (owner === token) owner = null }
+            synchronized(this) { if (owner === token) { owner = null; activeJob = null } }
             if (scope.isActive) onComplete()
         }
         job.start()

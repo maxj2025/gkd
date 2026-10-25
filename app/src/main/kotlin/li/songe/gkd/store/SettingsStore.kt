@@ -24,6 +24,7 @@ data class SettingsStore(
     val screenshotTargetAppId: String = "",
     val screenshotEventSelector: String = "",
     val httpServerPort: Int = 8888,
+    val httpServerAllowLan: Boolean = false,
     val updateSubsInterval: Long = UpdateTimeOption.Pause.value,
     val captureVolumeChange: Boolean = false,
     val toastWhenClick: Boolean = false,

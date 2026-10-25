@@ -12,9 +12,19 @@ import li.songe.json5.Json5
 import li.songe.json5.Json5Token
 
 
+import li.songe.gkd.ui.share.LocalDarkTheme
+
+val cardContainerColor: Color
+    @Composable
+    get() = if (LocalDarkTheme.current) {
+        MaterialTheme.colorScheme.surfaceContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerLowest
+    }
+
 val surfaceCardColors: CardColors
     @Composable
-    get() = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+    get() = CardDefaults.cardColors(containerColor = cardContainerColor)
 
 private fun getDarkJson5TokenColor(json5Token: Json5Token?): Color = when (json5Token) {
     null -> Color(0xFFFF00FF) // unknown token color

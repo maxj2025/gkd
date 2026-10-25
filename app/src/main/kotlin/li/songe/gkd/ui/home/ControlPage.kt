@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,7 +14,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
@@ -351,16 +351,20 @@ private fun IconTextCard(
             .padding(itemVerticalPadding),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        PerfIcon(
-            imageVector = imageVector,
+        Box(
             modifier = Modifier
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer)
-                .padding(8.dp)
-                .size(24.dp),
-            tint = MaterialTheme.colorScheme.primary,
-            contentDescription = null,
-        )
+                .size(42.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center
+        ) {
+            PerfIcon(
+                imageVector = imageVector,
+                modifier = Modifier.size(22.dp),
+                tint = MaterialTheme.colorScheme.primary,
+                contentDescription = null,
+            )
+        }
         Spacer(modifier = Modifier.width(itemHorizontalPadding))
         content()
     }
@@ -375,7 +379,11 @@ private fun ServerStatusCard() {
             .fillMaxWidth()
             .semantics {
                 onClick(label = "不执行操作", action = null)
-            }, shape = RoundedCornerShape(20.dp), colors = surfaceCardColors, onClick = {}) {
+            },
+        shape = MaterialTheme.shapes.large,
+        colors = surfaceCardColors,
+        onClick = {}
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -384,17 +392,22 @@ private fun ServerStatusCard() {
                     end = itemVerticalPadding,
                     top = itemVerticalPadding,
                     bottom = itemVerticalPadding / 2
-                ), verticalAlignment = Alignment.CenterVertically
+                ),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            PerfIcon(
-                imageVector = PerfIcon.Equalizer,
+            Box(
                 modifier = Modifier
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer)
-                    .padding(8.dp)
-                    .size(24.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                PerfIcon(
+                    imageVector = PerfIcon.Equalizer,
+                    modifier = Modifier.size(22.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
             Spacer(modifier = Modifier.width(itemHorizontalPadding))
             Column(
                 modifier = Modifier.weight(1f)
@@ -432,8 +445,9 @@ private fun ServerStatusCard() {
             if (latestRecordDesc != null) {
                 Row(
                     modifier = Modifier
-                        .padding(horizontal = 4.dp)
-                        .clip(MaterialTheme.shapes.extraSmall)
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                        .clip(MaterialTheme.shapes.small)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
                         .clickable(onClickLabel = "前往应用的规则汇总页面", onClick = throttle {
                             latestRecordFlow.value?.let {
                                 mainVm.navigatePage(
@@ -444,7 +458,8 @@ private fun ServerStatusCard() {
                             }
                         })
                         .fillMaxWidth()
-                        .padding(horizontal = 4.dp)
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(
                         modifier = Modifier.weight(1f),

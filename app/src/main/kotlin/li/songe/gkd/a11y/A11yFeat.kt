@@ -185,6 +185,7 @@ private fun initCaptureVolume() {
     }
 }
 
+@Volatile
 var isInteractive = true
     private set
 private val screenStateReceiver = object : BroadcastReceiver() {
@@ -201,6 +202,7 @@ private val screenStateReceiver = object : BroadcastReceiver() {
             Intent.ACTION_USER_PRESENT -> true
             else -> isInteractive
         }
+        if (!isInteractive) A11yRuleEngine.instance?.onScreenInactive()
         if (isInteractive) {
             val t = System.currentTimeMillis()
             if (t - appChangeTime > 500) { // 37.872(a11y) -> 38.228(onReceive)

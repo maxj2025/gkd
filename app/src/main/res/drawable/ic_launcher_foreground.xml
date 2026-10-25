@@ -1,4 +1,28 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="@color/ic_launcher_foreground_tint" android:pathData="M35,27 L66,27 Q73,27 73,34 L73,74 Q73,81 66,81 L35,81 Q28,81 28,74 L28,34 Q28,27 35,27 M36,34 L36,74 L65,74 L65,34 Z" android:fillType="evenOdd" />
-    <path android:fillColor="@color/ic_launcher_foreground_tint" android:pathData="M44,56 L51,63 L72,42 L77,47 L51,73 L39,61 Z" />
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer screen frame (high-precision rounded rectangle) -->
+    <path
+        android:fillColor="@color/ic_launcher_foreground_tint"
+        android:fillType="evenOdd"
+        android:pathData="M37,22 L71,22 Q78,22 78,29 L78,79 Q78,86 71,86 L37,86 Q30,86 30,79 L30,29 Q30,22 37,22 Z M35,27 Q33,27 33,29 L33,79 Q33,81 35,81 L73,81 Q75,81 75,79 L75,29 Q75,27 73,27 Z" />
+
+    <!-- Top screen speaker / camera dot -->
+    <path
+        android:fillColor="@color/ic_launcher_foreground_tint"
+        android:pathData="M52,24.5 L56,24.5 A1,1 0 0,1 56,26.5 L52,26.5 A1,1 0 0,1 52,24.5 Z" />
+
+    <!-- Center dynamic '清屏' skip & sweep mark -->
+    <!-- Swift forward skip triangle / check sweep -->
+    <path
+        android:fillColor="@color/ic_launcher_foreground_tint"
+        android:pathData="M43,53.5 L50.5,61 L65.5,43 L69.5,46.5 L50.5,69 L39,57.5 Z" />
+
+    <!-- Clean sweep accent bar -->
+    <path
+        android:fillColor="@color/ic_launcher_foreground_tint"
+        android:pathData="M44,38 L64,38 A2,2 0 0,1 64,41.5 L44,41.5 A2,2 0 0,1 44,38 Z" />
 </vector>

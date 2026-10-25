@@ -4,6 +4,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.google.accompanist.drawablepainter.rememberDrawablePainter
@@ -15,7 +16,9 @@ fun AppIcon(
     appId: String,
 ) {
     val icon = appIconMapFlow.collectAsState().value[appId]
-    val iconModifier = modifier.size(32.dp)
+    val iconModifier = modifier
+        .size(36.dp)
+        .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
     if (icon != null) {
         Image(
             painter = rememberDrawablePainter(icon),

@@ -1,7 +1,9 @@
 package li.songe.gkd.ui.home
 
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -9,6 +11,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
 import kotlinx.serialization.Serializable
@@ -65,12 +69,23 @@ fun HomePage() {
         topBar = page.topBar,
         floatingActionButton = page.floatingActionButton,
         bottomBar = {
-            NavigationBar {
+            NavigationBar(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                tonalElevation = 0.dp,
+            ) {
                 pages.forEach { page ->
+                    val selected = page.navItem.key == tab
                     NavigationBarItem(
-                        selected = page.navItem.key == tab,
+                        selected = selected,
                         modifier = Modifier,
                         onClick = { mainVm.handleClickTab(page.navItem) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            selectedTextColor = MaterialTheme.colorScheme.primary,
+                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
                         icon = {
                             PerfIcon(
                                 imageVector = page.navItem.icon,
@@ -78,7 +93,10 @@ fun HomePage() {
                             )
                         },
                         label = {
-                            Text(text = page.navItem.label)
+                            Text(
+                                text = page.navItem.label,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            )
                         })
                 }
             }

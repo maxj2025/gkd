@@ -120,10 +120,21 @@ sealed class ResolvedRule(
         return false
     }
 
-    fun checkForced(): Boolean {
-        if (forcedTime <= 0) return false
-        return System.currentTimeMillis() < matchChangedTime.value + matchDelay + forcedTime
+    fun cancelActionDelay() {
+        actionDelayTriggerTime.value = 0L
+        actionDelayJob.update { it?.cancel(); null }
     }
+
+    fun forcedRemaining(now: Long = System.currentTimeMillis()): Long =
+        if (forcedTime <= 0) 0L else (matchChangedTime.value + matchDelay + forcedTime - now).coerceAtLeast(0L)
+
+    fun checkForced(): Boolean = forcedRemaining() > 0
+
+    fun actionCooldownRemaining(now: Long = System.currentTimeMillis()): Long =
+        (actionTriggerTime.value + actionCd - now).coerceAtLeast(0L)
+
+    fun remainingMatchDelay(): Long =
+        (matchChangedTime.value + matchDelay - System.currentTimeMillis()).coerceAtLeast(0L)
 
     private var actionTriggerTime = atomic(0L)
     fun trigger() {

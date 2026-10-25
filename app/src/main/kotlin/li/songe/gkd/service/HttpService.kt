@@ -6,6 +6,7 @@ import android.util.Log
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
+import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.createApplicationPlugin
 import io.ktor.server.application.hooks.CallFailed
@@ -72,7 +73,7 @@ class HttpService : Service(), OnSimpleLife by DefaultSimpleLifeImpl() {
     override fun onCreate() = onCreated()
     override fun onDestroy() = onDestroyed()
 
-    val httpServerPortFlow = storeFlow.mapState(scope) { s -> s.httpServerPort }
+    val httpServerConfigFlow = storeFlow.mapState(scope) { s -> s.httpServerPort to s.httpServerAllowLan }
 
     init {
         useLogLifecycle()
@@ -81,8 +82,8 @@ class HttpService : Service(), OnSimpleLife by DefaultSimpleLifeImpl() {
         StopServiceReceiver.autoRegister()
         onCreated {
             scope.launchTry(Dispatchers.IO) {
-                httpServerPortFlow.collect {
-                    localNetworkIpsFlow.value = getIpAddressInLocalNetwork()
+                httpServerConfigFlow.collect { (_, allowLan) ->
+                    localNetworkIpsFlow.value = if (allowLan) getIpAddressInLocalNetwork() else emptyList()
                 }
             }
         }
@@ -95,7 +96,7 @@ class HttpService : Service(), OnSimpleLife by DefaultSimpleLifeImpl() {
         onCreated {
             httpNotif.notifyService()
             scope.launchTry(Dispatchers.IO) {
-                httpServerPortFlow.collect { port ->
+                httpServerConfigFlow.collect { (port, allowLan) ->
                     val isReboot = httpServerFlow.value != null
                     httpServerFlow.apply {
                         value?.stop()
@@ -107,7 +108,7 @@ class HttpService : Service(), OnSimpleLife by DefaultSimpleLifeImpl() {
                         return@collect
                     }
                     httpServerFlow.value = try {
-                        scope.createServer(port).apply { start() }
+                        scope.createServer(port, allowLan).apply { start() }
                     } catch (e: Exception) {
                         toast("HTTP服务启动失败:${e.stackTraceToString()}")
                         LogUtils.d("HTTP服务启动失败", e)
@@ -168,7 +169,11 @@ private val httpSubsItem = SubsItem(
     enableUpdate = false,
 )
 
-private fun CoroutineScope.createServer(port: Int) = embeddedServer(CIO, port) {
+private fun CoroutineScope.createServer(port: Int, allowLan: Boolean) = embeddedServer(
+    CIO,
+    port = port,
+    host = if (allowLan) "0.0.0.0" else "127.0.0.1",
+) {
     install(getKtorCorsPlugin())
     install(getKtorErrorPlugin())
     install(ContentNegotiation) { json(keepNullJson) }
@@ -241,22 +246,25 @@ private fun CoroutineScope.createServer(port: Int) = embeddedServer(CIO, port) {
 
 private fun getKtorCorsPlugin() = createApplicationPlugin(name = "KtorCorsPlugin") {
     onCall { call ->
-        mapOf(
-            HttpHeaders.AccessControlAllowOrigin to "*",
-            HttpHeaders.AccessControlAllowMethods to "*",
-            HttpHeaders.AccessControlAllowHeaders to "*",
-            HttpHeaders.AccessControlExposeHeaders to "*",
-            "Access-Control-Allow-Private-Network" to "true",
-        ).forEach { (k, v) ->
-            if (!call.response.headers.contains(k)) {
-                call.response.header(k, v)
-            }
+        val origin = call.request.headers[HttpHeaders.Origin]
+        if (origin != null && origin != DEVICE_UI_ORIGIN) {
+            call.respond(HttpStatusCode.Forbidden)
+            return@onCall
+        }
+        if (origin == DEVICE_UI_ORIGIN) {
+            call.response.header(HttpHeaders.AccessControlAllowOrigin, DEVICE_UI_ORIGIN)
+            call.response.header(HttpHeaders.AccessControlAllowMethods, "*")
+            call.response.header(HttpHeaders.AccessControlAllowHeaders, "*")
+            call.response.header(HttpHeaders.AccessControlExposeHeaders, "*")
+            call.response.header("Access-Control-Allow-Private-Network", "true")
         }
         if (call.request.httpMethod == HttpMethod.Options) {
             call.respond("all-cors-ok")
         }
     }
 }
+
+private const val DEVICE_UI_ORIGIN = "https://i.gkd.li"
 
 private fun getKtorErrorPlugin() = createApplicationPlugin(name = "KtorErrorPlugin") {
     onCall { call ->

@@ -141,4 +141,19 @@ class QingpingRuntimeTest {
         qingpingSerializedStop(mutex, { manualOff }) { enabled.remove("self") }
         assertTrue(enabled.contains("self")) // A newer explicit start supersedes old stop work.
     }
+
+    @Test fun cancelled_query_releases_its_slot_after_queued_completion() {
+        val dispatcher = QueuedDispatcher()
+        val scope = CoroutineScope(SupervisorJob() + dispatcher)
+        val runner = QingpingQueryRunner()
+        var calls = 0
+        assertTrue(runner.tryStart(scope, dispatcher) { calls++ })
+        runner.cancel()
+        dispatcher.drain()
+        assertEquals(0, calls)
+        assertTrue(runner.tryStart(scope, dispatcher) { calls++ })
+        dispatcher.drain()
+        assertEquals(1, calls)
+        scope.cancel()
+    }
 }

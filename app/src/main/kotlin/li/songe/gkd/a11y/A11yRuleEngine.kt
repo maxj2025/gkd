@@ -12,15 +12,21 @@ import kotlinx.atomicfu.atomic
 import kotlinx.atomicfu.getAndUpdate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runInterruptible
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import li.songe.gkd.META
 import li.songe.gkd.qingping.QingpingPolicy
+import li.songe.gkd.qingping.QingpingEventBuffer
+import li.songe.gkd.qingping.QingpingQueryEvents
+import li.songe.gkd.qingping.QingpingReadGate
+import li.songe.gkd.qingping.QingpingPollingRule
+import li.songe.gkd.qingping.qingpingFollowupDelay
 import li.songe.gkd.qingping.QingpingQueryRunner
 import li.songe.gkd.qingping.QingpingFollowup
 import li.songe.gkd.qingping.QingpingOutcome
@@ -54,20 +60,21 @@ import li.songe.gkd.util.ruleSummaryFlow
 import li.songe.selector.MatchOption
 import li.songe.selector.Selector
 import java.util.concurrent.Executors
-import kotlin.coroutines.Continuation
-import kotlin.coroutines.resume
 
 
 private val eventDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
 private val queryDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
 private val actionDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
 
+private val windowReadGate = QingpingReadGate()
 private val latestServiceMode = atomic(0)
 private val latestServiceTime = atomic(0L)
 
 class A11yRuleEngine(val service: A11yCommonImpl) {
     private val a11yContext = A11yContext(this)
-    private val effective get() = latestServiceMode.value == service.mode.value
+    private var connectedTime = 0L
+    private val effective get() = connectedTime != 0L && latestServiceTime.value == connectedTime &&
+        latestServiceMode.value == service.mode.value
     private val hasOthersService = when (service.mode) {
         AutomatorModeOption.A11yMode -> uiAutomationFlow.value != null
         AutomatorModeOption.AutomationMode -> A11yService.instance != null
@@ -76,6 +83,7 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
 
     fun onA11yConnected() {
         val serviceTime = System.currentTimeMillis()
+        connectedTime = serviceTime
         latestServiceMode.value = service.mode.value
         latestServiceTime.value = serviceTime
         // Start rule resolution without opening the UI. A foreground event may arrive
@@ -89,6 +97,11 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                     if (top.appId.isNotEmpty()) updateTopActivity(top.appId, top.activityId)
                 }
                 startQueryJob()
+            }
+        }
+        scope.launch {
+            storeFlow.map { it.enableMatch }.distinctUntilChanged().collect { enabled ->
+                if (!enabled) stopMatching() else startQueryJob()
             }
         }
         scope.launch(eventDispatcher) {
@@ -134,14 +147,14 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
     }
 
     val safeActiveWindow: AccessibilityNodeInfo?
-        get() = try {
+        get() = windowReadGate.tryRead { readActiveWindow() }
+
+    private fun readActiveWindow(): AccessibilityNodeInfo? = try {
             // 某些应用耗时 554ms
             // java.lang.SecurityException: Call from user 0 as user -2 without permission INTERACT_ACROSS_USERS or INTERACT_ACROSS_USERS_FULL not allowed.
             service.windowNodeInfo?.setGeneratedTime()
         } catch (_: Throwable) {
             null
-        }.apply {
-            a11yContext.rootCache.value = this
         }
 
     val safeActiveWindowAppId: String?
@@ -153,9 +166,11 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
     private var latestStateEvent: A11yEvent? = null
     private var lastContentEventTime = 0L
     private var lastEventTime = 0L
-    private val eventDeque = ArrayDeque<A11yEvent>()
+    private val eventDeque = QingpingEventBuffer<A11yEvent>(64,
+        same = { a, b -> a.sameAs(b) }, priority = { it.type == STATE_CHANGED })
+    private val eventRunner = QingpingQueryRunner()
     fun onA11yEvent(event: AccessibilityEvent?) {
-        if (!effective) return
+        if (!effective || !isInteractive) return
         if (!event.isUseful()) return
         // 拒绝副屏无障碍事件
         if (AndroidTarget.TIRAMISU && event.displayId != Display.DEFAULT_DISPLAY) return
@@ -201,18 +216,28 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         if (event.eventType == STATE_CHANGED) {
             latestStateEvent = a11yEvent
         }
-        synchronized(eventDeque) { eventDeque.addLast(a11yEvent) }
-        scope.launch(eventDispatcher) { consumeEvent(a11yEvent) }
+        eventDeque.offer(a11yEvent)
+        startEventConsumer()
     }
 
-    private val queryEvents = mutableListOf<A11yEvent>()
-    private suspend fun consumeEvent(headEvent: A11yEvent) {
-        val consumedEvents = synchronized(eventDeque) {
-            if (eventDeque.firstOrNull() !== headEvent) return
-            eventDeque.filter { it.sameAs(headEvent) }.apply {
-                repeat(size) { eventDeque.removeFirst() }
+    private val queryEvents = QingpingQueryEvents<A11yEvent> { a, b -> a.sameAs(b) }
+
+    private fun startEventConsumer() {
+        if (!effective || !isInteractive) return
+        eventRunner.tryStart(scope, eventDispatcher, onComplete = {
+            if (eventDeque.hasPending() && effective && isInteractive) startEventConsumer()
+        }) {
+            while (currentCoroutineContext().isActive && effective && isInteractive) {
+                val batch = eventDeque.takeBatch()
+                if (batch.isEmpty()) break
+                try { consumeEvent(batch) }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) { LogUtils.d(e) }
             }
         }
+    }
+
+    private suspend fun consumeEvent(consumedEvents: List<A11yEvent>) {
         val latestEvent = consumedEvents.last()
         val evAppId = latestEvent.appId
         val evActivityId = latestEvent.name
@@ -247,7 +272,7 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         if (evAppId != rightAppId || activityRule.skipConsumeEvent || !storeFlow.value.enableMatch) {
             return
         }
-        synchronized(queryEvents) { queryEvents.addAll(consumedEvents) }
+        queryEvents.addAll(consumedEvents)
         a11yContext.interruptKey++
         startQueryJob(byEvent = latestEvent)
     }
@@ -258,33 +283,38 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         // A new activity can arrive inside the old package cache's 100ms lifetime.
         // Resolve state changes against the actual window, rather than losing the
         // only launch event because a recent launcher result was reused.
+        if (!effective || !isInteractive) return null
         if (!fresh && lastAppId != null && System.currentTimeMillis() - lastGetAppIdTime <= 100) return lastAppId
         // 某些应用通过无障碍获取 safeActiveWindow 耗时长，导致多个事件连续堆积堵塞，无法检测到 appId 切换导致状态异常
         // https://github.com/gkd-kit/gkd/issues/622
-        lastAppId = withTimeoutOrNull(if (fresh) 500 else 100) {
-            runInterruptible(Dispatchers.IO) { safeActiveWindowAppId }
-        } ?: shizukuContextFlow.value.topCpn()?.packageName
+        val activeWindow = if (fresh) {
+            var root: AccessibilityNodeInfo? = null
+            for (attempt in 0 until 3) {
+                root = getTimeoutActiveWindow(500L, waitForSlot = true)
+                if (root != null) break
+                if (!effective || !isInteractive) return null
+                if (!windowReadGate.isBusy()) break
+                if (attempt < 2) delay(200L)
+            }
+            root
+        } else {
+            getTimeoutActiveWindow(100L)
+        }
+        lastAppId = activeWindow?.packageName?.toString() ?: shizukuContextFlow.value.topCpn()?.packageName
         lastGetAppIdTime = System.currentTimeMillis()
         return lastAppId
     }
 
-    // 某些场景耗时 5000 ms
-    private suspend fun getTimeoutActiveWindow(): AccessibilityNodeInfo? {
-        return suspendCancellableCoroutine { s ->
-            val temp = atomic<Continuation<AccessibilityNodeInfo?>?>(s)
-            scope.launch(Dispatchers.IO) {
-                delay(500L)
-                if (s.isActive) {
-                    temp.getAndUpdate { null }?.resume(null)
-                }
-            }
-            scope.launch(Dispatchers.IO) {
-                val a = safeActiveWindow
-                if (s.isActive) {
-                    temp.getAndUpdate { null }?.resume(a)
-                }
-            }
-        }
+    private suspend fun getTimeoutActiveWindow(
+        timeoutMs: Long = 500L,
+        waitForSlot: Boolean = false,
+    ): AccessibilityNodeInfo? {
+        if (!effective || !isInteractive) return null
+        val root = windowReadGate.read(scope, Dispatchers.IO, timeoutMs, waitForSlot) { readActiveWindow() }
+        // A timed-out read cannot publish its late result into the live node cache.
+        if (!effective || !isInteractive) return null
+        a11yContext.rootCache.value = root
+        return root
     }
 
     private val queryRunner = QingpingQueryRunner()
@@ -308,16 +338,18 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         byDelayRule: ResolvedRule? = null,
     ) {
         if (!effective) return
-        if (!hasQingpingRules()) { followup.cancel(); pendingDelayRules.clear(); return }
+        if (!storeFlow.value.enableMatch) { stopMatching(); return }
+        if (!hasQingpingRules()) { followup.cancel(); pendingDelayRules.clear(); queryEvents.clear(); return }
         val activeRules = activityRuleFlow.value.currentRules
         pendingDelayRules.removeAll { delayed -> activeRules.none { it === delayed } }
         if (byDelayRule != null && activeRules.any { it === byDelayRule }) pendingDelayRules.add(byDelayRule)
         val pendingDelay = pendingDelayRules.firstOrNull()
+        scheduleMatchDelays()
         // 无障碍从零启动时获取 safeActiveWindow 非常耗时
         if (byEvent == null && service.justStarted && !hasOthersService) return checkFutureStartJob()
         val started = queryRunner.tryStart(scope, queryDispatcher, onComplete = {
             val hasDelay = synchronized(this) { pendingDelayRules.isNotEmpty() }
-            if ((hasDelay || synchronized(queryEvents) { queryEvents.isNotEmpty() }) && hasQingpingRules()) {
+            if ((hasDelay || queryEvents.hasPending()) && hasQingpingRules()) {
                 followup.replace(scope, 0) { startQueryJob() }
             } else checkFutureStartJob()
         }) {
@@ -343,16 +375,79 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         if (started && pendingDelay != null) pendingDelayRules.remove(pendingDelay)
     }
 
-    private fun checkFutureStartJob() {
-        if (!effective || !hasQingpingRules()) { followup.cancel(); return }
-        val t = System.currentTimeMillis()
-        if (t - appChangeTime > QingpingPolicy.STARTUP_WINDOW_MS &&
-            topActivityFlow.value.appId !in storeFlow.value.qingpingExitApps) return
-        if (t - lastTriggerTime < 3000L || t - appChangeTime < 3000L) {
-            followup.replace(scope, 300) { startQueryJob() }
-        } else if (activityRuleFlow.value.hasFeatureAction) {
-            followup.replace(scope, 500) { startQueryJob(byForced = true) }
+    private fun scheduleMatchDelays() {
+        if (!storeFlow.value.enableMatch) return
+        val activityRule = activityRuleFlow.value
+        val exitEnabled = topActivityFlow.value.appId in storeFlow.value.qingpingExitApps
+        activityRule.currentRules.forEach { rule ->
+            if (!QingpingPolicy.allows(QingpingPolicy.kind(rule.g.group.name), exitEnabled,
+                    isInteractive, System.currentTimeMillis() - appChangeTime, rule is AppRule)) return@forEach
+            if (rule.status == RuleStatus.Status3 && rule.matchDelayJob.value == null) {
+                rule.matchDelayJob.value = scope.launch(actionDispatcher) {
+                    delay(rule.remainingMatchDelay())
+                    rule.matchDelayJob.value = null
+                    startQueryJob(byDelayRule = rule)
+                }
+            }
         }
+    }
+
+    @Synchronized
+    private fun checkFutureStartJob() {
+        if (!effective || !storeFlow.value.enableMatch || !hasQingpingRules()) { followup.cancel(); return }
+        val now = System.currentTimeMillis()
+        val top = topActivityFlow.value
+        val settings = storeFlow.value
+        val age = now - appChangeTime
+        val rules = activityRuleFlow.value.currentRules.map { rule ->
+            val allowed = QingpingPolicy.allows(QingpingPolicy.kind(rule.g.group.name),
+                top.appId in settings.qingpingExitApps, isInteractive, age, rule is AppRule)
+            QingpingPollingRule(allowed,
+                rule.status == RuleStatus.StatusOk || rule.status == RuleStatus.Status5,
+                rule.forcedRemaining(now), rule.actionCooldownRemaining(now))
+        }
+        val delayMs = qingpingFollowupDelay(rules, age, now - lastTriggerTime)
+        if (delayMs == null) { followup.cancel(); return }
+        val boundedDelay = if (top.appId !in settings.qingpingExitApps)
+            minOf(delayMs, (QingpingPolicy.STARTUP_WINDOW_MS - age + 1).coerceAtLeast(1)) else delayMs
+        followup.replace(scope, boundedDelay) {
+            val current = activityRuleFlow.value.currentRules
+            val currentTop = topActivityFlow.value
+            val currentSettings = storeFlow.value
+            val currentAge = System.currentTimeMillis() - appChangeTime
+            val hasForcedRule = current.any { rule ->
+                val allowed = QingpingPolicy.allows(
+                    QingpingPolicy.kind(rule.g.group.name),
+                    currentTop.appId in currentSettings.qingpingExitApps,
+                    isInteractive,
+                    currentAge,
+                    rule is AppRule,
+                )
+                allowed && (rule.status == RuleStatus.StatusOk || rule.status == RuleStatus.Status5) &&
+                    rule.checkForced()
+            }
+            startQueryJob(byForced = hasForcedRule)
+        }
+    }
+
+    @Synchronized
+    fun stopMatching() {
+        followup.cancel()
+        pendingDelayRules.clear()
+        queryEvents.clear()
+        queryRunner.cancel()
+        activityRuleFlow.value.currentRules.forEach { rule ->
+            rule.matchDelayJob.getAndUpdate { null }?.cancel()
+            rule.cancelActionDelay()
+        }
+    }
+
+    fun onScreenInactive() {
+        stopMatching()
+        eventDeque.clear()
+        eventRunner.cancel()
+        latestStateEvent = null
+        a11yContext.interruptKey++
     }
 
     private fun fixAppId(rightAppId: String) {
@@ -373,6 +468,7 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         byForced: Boolean = false,
         delayRule: ResolvedRule? = null,
     ) {
+        a11yContext.cancellationJob = currentCoroutineContext()[Job]
         val appId = topActivityFlow.value.appId
         val age = System.currentTimeMillis() - appChangeTime
         val exitEnabled = storeFlow.value.qingpingExitApps.contains(appId)
@@ -381,45 +477,10 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
         val newEvents = if (delayRule != null) {// 延迟规则不消耗事件
             null
         } else {
-            synchronized(queryEvents) {
-                if (byEvent != null && queryEvents.isEmpty()) {
-                    return
-                }
-                (if (queryEvents.size > 1) {
-                    val hasDiffItem = queryEvents.any { e ->
-                        queryEvents.any { e2 -> !e.sameAs(e2) }
-                    }
-                    if (hasDiffItem) {
-                        // 存在不同的事件节点, 全部丢弃使用 root 查询
-                        null
-                    } else {
-                        // type,appId,className 一致, 需要在 synchronized 外验证是否是同一节点
-                        arrayOf(
-                            queryEvents[queryEvents.size - 2],
-                            queryEvents.last(),
-                        )
-                    }
-                } else if (queryEvents.size == 1) {
-                    arrayOf(queryEvents.last())
-                } else {
-                    null
-                }).apply {
-                    queryEvents.clear()
-                }
-            }
+            if (byEvent != null && !queryEvents.hasPending()) return
+            queryEvents.take()
         }
         val activityRule = synchronized(topActivityFlow) { activityRuleFlow.value }
-        activityRule.currentRules.forEach { rule ->
-            if (!QingpingPolicy.allows(QingpingPolicy.kind(rule.g.group.name), exitEnabled,
-                    isInteractive, System.currentTimeMillis() - appChangeTime, rule is AppRule)) return@forEach
-            if (rule.status == RuleStatus.Status3 && rule.matchDelayJob.value == null) {
-                rule.matchDelayJob.value = scope.launch(actionDispatcher) {
-                    delay(rule.matchDelay)
-                    rule.matchDelayJob.value = null
-                    startQueryJob(byDelayRule = rule)
-                }
-            }
-        }
         if (activityRule.skipMatch) {
             // 如果当前应用没有规则/暂停匹配, 则不去调用获取事件节点避免阻塞
             return
@@ -468,7 +529,7 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                     lastNode = null
                 }
             }
-            val nodeVal = (lastNode ?: getTimeoutActiveWindow()) ?: continue
+            val nodeVal = (lastNode ?: getTimeoutActiveWindow()) ?: return
             val rightAppId = nodeVal.packageName?.toString() ?: break
             val matchApp = rule.matchActivity(rightAppId)
             if (topActivityFlow.value.appId != rightAppId || (!matchApp && rule is AppRule)) {
@@ -495,7 +556,10 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
             if (freshRoot.packageName?.toString() != topActivity.appId) return
             if (checkOutDate(activityRule, tempStateEvent)) return
             if (!target.refresh() || target.packageName?.toString() != topActivity.appId || !target.isVisibleToUser) continue
-            val freshContext = A11yContext(this, interruptable = false).apply { rootCache.value = freshRoot }
+            val freshContext = A11yContext(this, interruptable = false).apply {
+                rootCache.value = freshRoot
+                cancellationJob = currentCoroutineContext()[Job]
+            }
             if (freshContext.queryRule(rule, freshRoot) != target || freshContext.incompleteRead) continue
             if (checkOutDate(activityRule, tempStateEvent)) return
             if (!effective || !QingpingPolicy.canAct(QingpingPolicy.kind(rule.g.group.name),
@@ -535,7 +599,10 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                     { it.isVisibleToUser && (!it.text.isNullOrBlank() || !it.contentDescription.isNullOrBlank()) })
             }.getOrDefault(false)
             if (!readable) return QingpingOutcome.UNKNOWN
-            val context = A11yContext(this, interruptable = false).apply { rootCache.value = root }
+            val context = A11yContext(this, interruptable = false).apply {
+                rootCache.value = root
+                cancellationJob = currentCoroutineContext()[Job]
+            }
             val present = try { context.queryRule(rule, root) != null }
                 catch (e: CancellationException) { throw e }
                 catch (_: Throwable) { return QingpingOutcome.UNKNOWN }

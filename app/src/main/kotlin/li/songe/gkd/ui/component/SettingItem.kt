@@ -86,6 +86,7 @@ fun SettingItem(
             PerfIcon(
                 imageVector = imageVector,
                 contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             )
         }
     }
