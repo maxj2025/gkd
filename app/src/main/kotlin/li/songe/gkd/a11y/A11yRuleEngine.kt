@@ -207,12 +207,12 @@ class A11yRuleEngine(val service: A11yCommonImpl) {
                 "type:${event.eventType}, time:${event.eventTime - lastEventTime}, app:${event.packageName}, cls:${event.className}"
             )
         }
-        if (event.eventTime < lastEventTime) {
-            // 某些应用会发送负时间事件, 直接丢弃
-            // type:32, time:-104, app:com.miui.home, cls:com.miui.home.launcher.Launcher
+        if (event.eventTime < lastEventTime && event.eventType != STATE_CHANGED) {
+            // Content events can be stale; state changes still need a fresh window check.
+            // Android may deliver a valid launch state after newer content events.
             return
         }
-        lastEventTime = event.eventTime
+        lastEventTime = maxOf(lastEventTime, event.eventTime)
         if (event.eventType == STATE_CHANGED) {
             latestStateEvent = a11yEvent
         }
